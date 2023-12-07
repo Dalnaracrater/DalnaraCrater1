@@ -1,6 +1,9 @@
 ---
+layout: post
 title: "(DreamHack) web-misconf-1"
 date: 2021-06-01 05:24:00 -0400
+description: web-misconf
+# tags: formatting
 categories: Security CTF
 ---
 
@@ -9,6 +12,7 @@ categories: Security CTF
 ## 풀이
 
 접속하면 다음과 같은 화면이 출력된다.
+
 ![image](https://user-images.githubusercontent.com/24788751/120296923-91996700-c303-11eb-8b0b-61b4b4fb4fd8.png)
 
 회원가입 기능이 따로 없어 admin/admin으로 로그인 시도를 해보았는데 성공하였다.

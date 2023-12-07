@@ -1,7 +1,8 @@
 ---
+layout: post
 title: "(DreamHack) rev-basic-0"
 date: 2021-03-03 05:24:00 -0400
-categories: Security
+categories: Security CTF
 ---
 
 ## 풀이

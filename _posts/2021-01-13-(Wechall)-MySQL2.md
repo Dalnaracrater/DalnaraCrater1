@@ -1,7 +1,8 @@
 ---
+layout: post
 title: "(Wechall) MySQL II"
 date: 2021-01-13 05:24:00 -0400
-categories: Security
+categories: Security CTF
 ---
 
 # (Wechall) MySQL 2 write up

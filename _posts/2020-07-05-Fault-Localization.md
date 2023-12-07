@@ -1,7 +1,8 @@
 ---
+layout: post
 title: "Fault Localization"
 date: 2020-07-05 05:24:00 -0400
-categories: Research
+categories: Research Programming-language
 ---
 # Fault Localization: 결함위치식별
 

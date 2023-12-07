@@ -1,7 +1,9 @@
 ---
+layout: post
 title: "Program Synthesis"
 date: 2020-02-08 18:00:00 -0400
-categories: Research Programming
+categories: Research Programming-language
+featured: true
 ---
 
 프로그램 합성 (Program synthesis)는 논리식으로 표현된 명세를 만족하는 프로그램을 생성하는 자동 생성 기법이다.

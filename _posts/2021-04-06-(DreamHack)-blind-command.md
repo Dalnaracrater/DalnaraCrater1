@@ -1,4 +1,5 @@
 ---
+layout: post
 title: "(DreamHack) blind-command"
 date: 2021-04-06 05:24:00 -0400
 categories: Security CTF

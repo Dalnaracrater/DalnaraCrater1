@@ -1,4 +1,5 @@
 ---
+layout: post
 title: "(DreamHack) Mango"
 date: 2021-05-25 05:24:00 -0400
 categories: Security CTF

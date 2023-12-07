@@ -1,7 +1,8 @@
 ---
+layout: post
 title: "CGO Symposium 후기"
 date: 2021-03-10 02:24:00 -0400
-categories: Conference
+categories: Conference Optimization Compiler Programming-language
 ---
 
 ## 간단한 후기

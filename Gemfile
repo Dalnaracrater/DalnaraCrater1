@@ -1,20 +1,27 @@
-source "https://rubygems.org"
-
-gem "github-pages", group: :jekyll_plugins
-
-gem "kramdown", ">= 2.3.1"
-gem "tzinfo-data"
-gem "wdm", "~> 0.1.0" if Gem.win_platform?
-gem "activesupport", ">= 4.1.11"
-gem "nokogiri", ">= 1.11.0"
-
-# If you have any plugins, put them here!
+source 'https://rubygems.org'
 group :jekyll_plugins do
-  gem "jekyll-paginate"
-  gem "jekyll-sitemap"
-  gem "jekyll-gist"
-  gem "jekyll-feed"
-  gem "jemoji"
-  gem "jekyll-algolia"
-  gem "jekyll-include-cache"
+    gem 'classifier-reborn'
+    gem 'jekyll'
+    gem 'jekyll-archives'
+    gem 'jekyll-diagrams'
+    gem 'jekyll-email-protect'
+    gem 'jekyll-feed'
+    gem 'jekyll-get-json'
+    gem 'jekyll-imagemagick'
+    gem 'jekyll-jupyter-notebook'
+    gem 'jekyll-link-attributes'
+    gem 'jekyll-minifier'
+    gem 'jekyll-paginate-v2'
+    gem 'jekyll-scholar'
+    gem 'jekyll-sitemap'
+    gem 'jekyll-toc'
+    gem 'jekyll-twitter-plugin'
+    gem 'jemoji'
+    gem 'mini_racer'
+    gem 'unicode_utils'
+    gem 'webrick'
+end
+group :other_plugins do
+    gem 'feedjira'
+    gem 'httparty'
 end

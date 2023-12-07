@@ -1,4 +1,5 @@
 ---
+layout: post
 title: "(DreamHack) login-1"
 date: 2021-06-01 05:24:00 -0400
 categories: Security CTF

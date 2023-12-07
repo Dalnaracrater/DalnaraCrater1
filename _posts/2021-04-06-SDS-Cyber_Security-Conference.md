@@ -1,7 +1,9 @@
 ---
+layout: post
 title: "SDS Cyber Security Conference 2021 후기"
 date: 2021-04-06 02:24:00 -0400
 categories: Conference Security
+featured: true
 ---
 
 ## 간단한 후기

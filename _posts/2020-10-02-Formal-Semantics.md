@@ -1,7 +1,9 @@
 ---
+layout: post
 title: "Formal Semantics"
 date: 2020-10-02 05:24:00 -0400
-categories: Programming
+categories: Programming-language
+featured: true
 ---
 # Formal Semantics
 
@@ -31,8 +33,6 @@ Assignment와 binding을 잘 구분하면 aliasing 유용하게 사용할 수 �
 
 State = Exp X Env X Store
 p ㅏ E,o -> E',o'
-
-### 
 
 
 ### Big-step
