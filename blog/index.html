@@ -93,7 +93,7 @@ pagination:
     </div>
     <hr>
   {% endif %}
-
+<h2>hi</h2>
   <ul class="post-list">
     {% for post in paginator.posts %}
 
@@ -106,7 +106,6 @@ pagination:
     {% assign tags = post.tags | join: "" %}
     {% assign categories = post.categories | join: "" %}
 
-    <h1>hihihi</h1>
     <li>
 {%- if post.thumbnail -%}
 <div class="row">
